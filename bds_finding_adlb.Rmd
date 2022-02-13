@@ -148,12 +148,23 @@ For example, when creating `ADVS`, a lookup based on the SDTM `--TESTCD` value
 may be created:
 
 ```{r, eval=TRUE, echo=FALSE}
-lb %>% count(LBTEST, LBTESTCD, LBCAT) %>% 
-  mutate(PARAM = LBTEST,
+param_lookup <- lb %>% count(LBTEST, LBTESTCD, LBORRESU, LBCAT) %>% 
+  mutate(PARAM = str_c(LBTEST, " (", LBORRESU, ")"),
          PARAMCD = LBTESTCD,
-         PARCAT1 = str_to_sentence(LBCAT))
+         PARCAT1 = str_to_sentence(LBCAT),
+         PARAMN = seq(1:length(PARAMCD))) %>% 
+  select(-n)
 
 ```
 
 
+```{r eval=TRUE}
+adsl_lb_pcd <- left_join(adsl_lb_ady, select(param_lookup, LBTESTCD, PARAMCD), by = "LBTESTCD")
+```
+
+
+## Derive Timing Variables (e.g. `APHASE`, `AVISIT`, `APERIOD`) {#timing}
+
+Categorical timing variables are protocol and analysis dependent.  Below is a 
+simple example. 
 
