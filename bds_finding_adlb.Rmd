@@ -1,0 +1,159 @@
+---
+title: "Creating a BDS Finding ADaM - ADLB"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+if (!requireNamespace("remotes", quietly = TRUE)) {
+  install.packages("remotes")
+}
+remotes::install_github("pharmaverse/admiral.test", ref = "main") # This is a required dependency of {admiral}
+remotes::install_github("pharmaverse/admiral", ref = "main")
+```
+
+# Introduction
+
+This article describes creating a BDS finding ADaM. Examples are currently 
+presented and tested in the context of ADVS.  However, the examples could be
+applied to other BDS Finding ADaMs such as ADEG, ADLB, etc. where a single 
+result is captured in an SDTM Finding domain on a single date and/or time.
+
+**Note**: *All examples assume CDISC SDTM and/or ADaM format as input unless 
+otherwise specified.*
+
+# Programming Workflow
+
+* [Read in Data](#readdata)
+* [Derive/Impute Numeric Date/Time and Analysis Day (`ADT`, `ADTM`, `ADY`, `ADTF`, `ATMF`)](#datetime)
+* [Assign `PARAMCD`, `PARAM`, `PARAMN`, `PARCAT1`](#paramcd)
+* [Derive Results (`AVAL`, `AVALC`)](#aval)
+* [Derive Additional Parameters (e.g. `BSA`, `BMI`, or `MAP` for `ADVS`)](#derive_param)
+* [Derive Timing Variables (e.g. `APHASE`, `AVISIT`, `APERIOD`)](#timing)
+* [Timing Flag Variables (e.g. `ONTRTFL`)](#timingflag)
+* [Assign Reference Range Indicator (`ANRIND`)](#referencerange)
+* [Derive Baseline (`BASETYPE`, `ABLFL`, `BASE`, `BASEC`, `BNRIND`)](#baseline)
+* [Derive Change from Baseline (`CHG`, `PCHG`)](#bchange)
+* [Derive Analysis Flags (e.g. `ANL01FL`)](#analysisrec)
+* [Assign Treatment (`TRTA`, `TRTP`)](#treatment)
+* [Assign `ASEQ`](#aseq)
+* [Derive Categorization Variables (`AVALCATx`)](#cat)
+* [Add ADSL variables](#adsl_vars)
+* [Derive New Rows](#additional)
+
+## Read in Data {#readdata}
+
+```{r}
+library(admiral)
+library(dplyr)
+library(admiral.test)
+library(lubridate)
+library(stringr)
+library(tibble)
+
+
+data("adsl")
+data("lb")
+lb <- convert_blanks_to_na(lb) # Maybe explain why we do this
+```
+
+```{r}
+adsl_vars <- vars(TRTSDT, TRTEDT, TRT01A, TRT01P)
+
+adsl_lb <- left_join(
+  lb,
+  select(adsl, STUDYID, USUBJID, !!!adsl_vars),
+  by = c("STUDYID", "USUBJID")
+)
+```
+
+
+ 
+```{r, eval=TRUE, echo=FALSE}
+dataset_vignette(
+  adsl_lb, 
+  display_vars = vars(USUBJID, LBTESTCD, LBDTC, VISIT, TRTSDT, TRTEDT, TRT01A, TRT01P),
+    filter = LBTESTCD == "ALB" & VISIT == "WEEK 2"
+)
+```
+
+## Derive/Impute Numeric Date/Time and Analysis Day (`ADT`, `ADTM`, `ADY`, `ADTF`, `ATMF`) {#datetime}
+
+The function `derive_vars_dt()` can be used to derive `ADT`. This function allows 
+the user to impute the date as well.
+
+Example calls:
+
+```{r eval=TRUE}
+
+# Should we introduce some partial dates here to show off impuration and preserve functions?
+
+adsl_lb_dt <- derive_vars_dt(adsl_lb, new_vars_prefix = "A", dtc = LBDTC)
+```
+
+
+```{r, eval=TRUE, echo=FALSE}
+dataset_vignette(
+  adsl_lb_dt, 
+  display_vars = vars(USUBJID, VISIT, LBDTC, ADT, ADTF),
+  filter = LBTESTCD == "ALB"
+)
+```
+
+Similarly, `ADTM` may be created using the function `derive_vars_dtm()`. 
+Imputation may be done on both the date and time components of `ADTM`.
+
+```{r eval=FALSE}
+# CDISC Pilot data does not contain times and the output of the derivation
+# ADTM is not presented.
+adsl_lb_dtm <- derive_vars_dtm(
+  adsl_lb, 
+  new_vars_prefix = "A", 
+  dtc = LBDTC, 
+  date_imputation = "FIRST"
+)
+```
+
+
+```{r, eval=TRUE, echo=FALSE}
+dataset_vignette(
+  adsl_lb_dtm, 
+  display_vars = vars(USUBJID, VISIT, LBDTC, ADTM, ADTF),
+  filter = LBTESTCD == "ALB"
+)
+
+```
+
+```{r}
+adsl_lb_ady <- derive_var_ady(adsl_lb_dtm, reference_date = TRTSDT, date = ADTM)
+
+```
+
+
+```{r, eval=TRUE, echo=FALSE}
+dataset_vignette(
+  adsl_lb_ady, 
+  display_vars = vars(USUBJID, VISIT, TRTSDT, ADTM, ADY,),
+  filter = USUBJID == "01-716-1024"
+)
+```
+
+
+## Assign `PARAMCD`, `PARAM`, `PARAMN`, `PARCAT1` {#paramcd}
+
+To assign parameter level values such as `PARAMCD`, `PARAM`, `PARAMN`, `PARCAT1`,
+etc., a lookup can be created to join to the source data.
+
+For example, when creating `ADVS`, a lookup based on the SDTM `--TESTCD` value 
+may be created:
+
+```{r, eval=TRUE, echo=FALSE}
+lb %>% count(LBTEST, LBTESTCD, LBCAT) %>% 
+  mutate(PARAM = LBTEST,
+         PARAMCD = LBTESTCD,
+         PARCAT1 = str_to_sentence(LBCAT))
+
+```
+
+
+
